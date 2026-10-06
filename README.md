@@ -90,6 +90,8 @@ WORKTREE_DIR_PATH/login-tests/
 
 The app repos get a `qa-` prefixed branch so QA tweaks stay separate from the test branch.
 
+Once all three exist, any `ANDROID_REPO_PATH` / `IOS_REPO_PATH` paths in the Appium worktree's copied `.env` are rewritten to point at the new Android/iOS worktrees, so the tests run against the worktree builds rather than the main checkouts. (The main Appium repo's `.env` isn't touched.) Build each app worktree before running tests — the script prints their paths at the end.
+
 The script stops at the first failure, and any worktrees created before that point are left in place. Clean them up with `remove_worktree_suite.sh` before re-running.
 
 ### Remove a suite
