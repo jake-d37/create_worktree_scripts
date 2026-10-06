@@ -21,6 +21,7 @@ usage() {
 DIR_PREFIX=""
 REPO_PATH=""
 GITIGNORED_FILES=()
+INSTALL_PNPM_DEPS=false
 WORKTREE_DIR=""
 BRANCH=""
 
@@ -42,6 +43,7 @@ while [[ $# -gt 0 ]]; do
                     REPO_PATH="$APPIUM_REPO_PATH"
                     GITIGNORED_FILES=("${APPIUM_GITIGNORED_FILES[@]}")
                     DIR_PREFIX="appium_"
+                    INSTALL_PNPM_DEPS=true
                     ;;
                 *)
                     echo "Unknown --repo value: '$2' (expected android, ios or appium)" >&2
@@ -109,5 +111,36 @@ for file in "${GITIGNORED_FILES[@]}"; do
     cp -R "$src" "$dest"
     echo "Copied $file"
 done
+
+# Install pnpm deps up front. Otherwise the first `pnpm test:*` sees node_modules out of sync and
+# re-verifies every lockfile entry against the registry, since that cache doesn't carry over to a
+# new worktree. Uses the repo's mise-pinned node/pnpm when mise is available.
+install_pnpm_deps() {
+    local worktree="$1"
+    local runner=()
+
+    if command -v mise >/dev/null 2>&1; then
+        mise trust --yes "$worktree" >/dev/null
+        (cd "$worktree" && mise install) || return 1
+        runner=(mise exec --)
+    fi
+
+    # The main checkout's lockfile was already verified there, so skip re-verifying it when unchanged
+    local install_args=(--frozen-lockfile)
+    if git -C "$worktree" diff --quiet "$(git -C "$REPO_PATH" rev-parse HEAD)" -- pnpm-lock.yaml; then
+        install_args+=(--trust-lockfile)
+    else
+        echo "pnpm-lock.yaml differs from the main checkout — installing with full lockfile verification."
+    fi
+
+    (cd "$worktree" && "${runner[@]}" pnpm install "${install_args[@]}")
+}
+
+if [[ "$INSTALL_PNPM_DEPS" == true ]]; then
+    echo "Installing pnpm dependencies..."
+    if ! install_pnpm_deps "$NEW_WORKTREE_PATH"; then
+        echo "pnpm install failed — run it manually in $NEW_WORKTREE_PATH before running tests." >&2
+    fi
+fi
 
 echo "Worktree ready at $NEW_WORKTREE_PATH"

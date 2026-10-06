@@ -69,6 +69,8 @@ Branch handling:
 
 Fails if the worktree folder already exists.
 
+For `--repo appium`, the script also runs `pnpm install --frozen-lockfile` in the new worktree, using the repo's mise-pinned node/pnpm when `mise` is installed (it trusts the worktree's mise config and installs any missing tools first). Without this, the first `pnpm test:*` in a fresh worktree stalls on "Verifying lockfile against supply-chain policies", because pnpm re-checks every lockfile entry against the registry. If `pnpm-lock.yaml` is unchanged from the main checkout, `--trust-lockfile` skips that re-check, since the main checkout already verified it. A failed install prints a warning but doesn't fail the script.
+
 ### Create a QA suite (all three repos)
 
 ```bash
