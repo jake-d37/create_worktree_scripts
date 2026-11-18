@@ -1,6 +1,6 @@
 # create_worktree_scripts
 
-Bash scripts for spinning up (and tearing down) git worktrees across an Android app repo, an iOS app repo and an Appium test repo — one at a time, or all three at once for a QA feature.
+Bash script for spinning up a git worktree of an Android app repo, an iOS app repo or an Appium test repo.
 
 Each new worktree also gets copies of the local, gitignored files it needs to build or run (SDK paths, secrets, local tool settings) copied over from the main checkout.
 
@@ -9,8 +9,6 @@ Each new worktree also gets copies of the local, gitignored files it needs to bu
 | Script | What it does |
 |---|---|
 | `create_mobile_worktree.sh` | Creates a single worktree for one repo |
-| `create_qa_suite_worktree.sh` | Creates matching worktrees for all three repos under one feature folder |
-| `remove_worktree_suite.sh` | Removes a feature's worktrees (and optionally their branches) |
 
 ## Setup
 
@@ -49,7 +47,7 @@ Each new worktree also gets copies of the local, gitignored files it needs to bu
    export PATH="$HOME/path/to/create_worktree_scripts:$PATH"
    ```
 
-   Add the folder itself rather than symlinking the scripts elsewhere: they find `.env` (and each other) relative to their real location.
+   Add the folder itself rather than symlinking the script elsewhere: it finds `.env` relative to its real location.
 
 > **Note:** `.env` is loaded with `source`, so it's really a bash file — `$HOME` expands and arrays work, but it won't parse with standard dotenv tools.
 
@@ -71,43 +69,7 @@ Fails if the worktree folder already exists.
 
 For `--repo appium`, the script also runs `pnpm install --frozen-lockfile` in the new worktree, using the repo's mise-pinned node/pnpm when `mise` is installed (it trusts the worktree's mise config and installs any missing tools first). Without this, the first `pnpm test:*` in a fresh worktree stalls on "Verifying lockfile against supply-chain policies", because pnpm re-checks every lockfile entry against the registry. If `pnpm-lock.yaml` is unchanged from the main checkout, `--trust-lockfile` skips that re-check, since the main checkout already verified it. A failed install prints a warning but doesn't fail the script.
 
-### Create a QA suite (all three repos)
-
-```bash
-create_qa_suite_worktree.sh --feature <feature> --ticket <ticket-ref> --branch-base-name <name>
-```
-
-Example:
-
-```bash
-create_qa_suite_worktree.sh --feature login-tests --ticket abc-123 --branch-base-name login-tests
-```
-
-```
-WORKTREE_DIR_PATH/login-tests/
-├── appium_login-tests    → abc-123/login-tests
-├── android_login-tests   → abc-123/qa-login-tests
-└── ios_login-tests       → abc-123/qa-login-tests
-```
-
-The app repos get a `qa-` prefixed branch so QA tweaks stay separate from the test branch.
-
-Once all three exist, any `ANDROID_REPO_PATH` / `IOS_REPO_PATH` paths in the Appium worktree's copied `.env` are rewritten to point at the new Android/iOS worktrees, so the tests run against the worktree builds rather than the main checkouts. (The main Appium repo's `.env` isn't touched.) Build each app worktree before running tests — the script prints their paths at the end.
-
-The script stops at the first failure, and any worktrees created before that point are left in place. Clean them up with `remove_worktree_suite.sh` before re-running.
-
-### Remove a suite
-
-```bash
-remove_worktree_suite.sh --feature <feature> [--delete-branches]
-```
-
-- Runs `git worktree remove` on each `<repo>_<feature>` worktree; missing ones are skipped, so it's safe to re-run.
-- Worktrees with uncommitted changes are **not** removed — commit, stash, or remove them manually with `git worktree remove --force`. The script carries on with the others and exits non-zero, listing what failed.
-- `--delete-branches` also deletes each worktree's branch with `git branch -d`, which refuses unmerged branches. Use `git branch -D` manually if you're sure.
-- The feature folder is removed only once it's empty.
-
 ## Requirements
 
 - bash (macOS's built-in 3.2 is fine)
-- git 2.22+ (for `git worktree remove` and `git branch --show-current`)
+- git 2.5+ (for `git worktree`)
