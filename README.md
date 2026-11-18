@@ -1,14 +1,14 @@
 # create_worktree_scripts
 
-Bash script for spinning up a git worktree of an Android app repo, an iOS app repo or an Appium test repo.
+Bash script for spinning up a git worktree of a monorepo that holds mobile apps and their test suite.
 
-Each new worktree also gets copies of the local, gitignored files it needs to build or run (SDK paths, secrets, local tool settings) copied over from the main checkout.
+Each new worktree also gets copies of the local, gitignored files it needs to build or run (SDK paths, secrets, local tool settings) copied over from the main checkout, and its Node packages installed.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `create_mobile_worktree.sh` | Creates a single worktree for one repo |
+| `create_mobile_worktree.sh` | Creates a worktree of the repo |
 
 ## Setup
 
@@ -21,27 +21,24 @@ Each new worktree also gets copies of the local, gitignored files it needs to bu
    ```bash
    WORKTREE_DIR_PATH="$HOME/worktrees/"
 
-   ANDROID_REPO_PATH="$HOME/repos/my-android-app"
-   IOS_REPO_PATH="$HOME/repos/my-ios-app"
-   APPIUM_REPO_PATH="$HOME/repos/my-appium-tests"
+   REPO_PATH="$HOME/repos/my-mobile-monorepo"
 
-   ANDROID_GITIGNORED_FILES=(
-       # paths relative to ANDROID_REPO_PATH
-       local.properties
+   GITIGNORED_FILES=(
+       # paths relative to REPO_PATH
+       android/local.properties
+       ios/Config/Secrets.xcconfig
+       tests/.env
    )
-   IOS_GITIGNORED_FILES=(
-       # paths relative to IOS_REPO_PATH
-       Config/Secrets.xcconfig
-   )
-   APPIUM_GITIGNORED_FILES=(
-       # paths relative to APPIUM_REPO_PATH
-       .env
+
+   PNPM_INSTALL_DIRS=(
+       # directories relative to REPO_PATH
+       tests
    )
    ```
 
    `.env` is gitignored, so your local paths stay out of the repo.
 
-2. (Optional) Add the folder to your `PATH` so the scripts run from anywhere — e.g. in `~/.zshrc`:
+2. (Optional) Add the folder to your `PATH` so the script runs from anywhere — e.g. in `~/.zshrc`:
 
    ```bash
    export PATH="$HOME/path/to/create_worktree_scripts:$PATH"
@@ -53,13 +50,11 @@ Each new worktree also gets copies of the local, gitignored files it needs to bu
 
 ## Usage
 
-### Create one worktree
-
 ```bash
-create_mobile_worktree.sh --repo <android|ios|appium> --worktree-dir <feature> --branch <branch>
+create_mobile_worktree.sh --worktree-dir <name> --branch <branch>
 ```
 
-Creates `WORKTREE_DIR_PATH/<feature>/<repo>_<feature>`, then copies in that repo's gitignored files. Files that don't exist in the main checkout are skipped with a warning.
+Creates `WORKTREE_DIR_PATH/<name>`, a full checkout of the repo (every app and the test suite, on one branch), then copies in the gitignored files. Files that don't exist in the main checkout are skipped with a warning.
 
 Branch handling:
 - **Exists locally or on `origin`** → checked out (remote branches are tracked automatically)
@@ -67,7 +62,9 @@ Branch handling:
 
 Fails if the worktree folder already exists.
 
-For `--repo appium`, the script also runs `pnpm install --frozen-lockfile` in the new worktree, using the repo's mise-pinned node/pnpm when `mise` is installed (it trusts the worktree's mise config and installs any missing tools first). Without this, the first `pnpm test:*` in a fresh worktree stalls on "Verifying lockfile against supply-chain policies", because pnpm re-checks every lockfile entry against the registry. If `pnpm-lock.yaml` is unchanged from the main checkout, `--trust-lockfile` skips that re-check, since the main checkout already verified it. A failed install prints a warning but doesn't fail the script.
+For each directory in `PNPM_INSTALL_DIRS`, the script also runs `pnpm install --frozen-lockfile` there, using that directory's mise-pinned node/pnpm when `mise` is installed (it trusts the directory's mise config and installs any missing tools first). Without this, the first `pnpm test:*` in a fresh worktree stalls on "Verifying lockfile against supply-chain policies", because pnpm re-checks every lockfile entry against the registry. If the directory's `pnpm-lock.yaml` is unchanged from the main checkout, `--trust-lockfile` skips that re-check, since the main checkout already verified it. A failed install prints a warning but doesn't fail the script.
+
+To remove a worktree, use `git -C <repo> worktree remove <path>`.
 
 ## Requirements
 
