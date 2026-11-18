@@ -10,49 +10,17 @@ fi
 source "$ENV_FILE"
 
 : "${WORKTREE_DIR_PATH:?WORKTREE_DIR_PATH must be set in $ENV_FILE}"
-: "${ANDROID_REPO_PATH:?ANDROID_REPO_PATH must be set in $ENV_FILE}"
-: "${IOS_REPO_PATH:?IOS_REPO_PATH must be set in $ENV_FILE}"
-: "${APPIUM_REPO_PATH:?APPIUM_REPO_PATH must be set in $ENV_FILE}"
+: "${REPO_PATH:?REPO_PATH must be set in $ENV_FILE}"
 
 usage() {
-    echo "Usage: $(basename "$0") --repo <android|ios|appium> --worktree-dir <dir-name> --branch <branch-name>"
+    echo "Usage: $(basename "$0") --worktree-dir <dir-name> --branch <branch-name>"
 }
 
-DIR_PREFIX=""
-REPO_PATH=""
-GITIGNORED_FILES=()
-INSTALL_PNPM_DEPS=false
 WORKTREE_DIR=""
 BRANCH=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --repo)
-            case "$2" in
-                android)
-                    REPO_PATH="$ANDROID_REPO_PATH"
-                    GITIGNORED_FILES=("${ANDROID_GITIGNORED_FILES[@]}")
-                    DIR_PREFIX="android_"
-                    ;;
-                ios)
-                    REPO_PATH="$IOS_REPO_PATH"
-                    GITIGNORED_FILES=("${IOS_GITIGNORED_FILES[@]}")
-                    DIR_PREFIX="ios_"
-                    ;;
-                appium)
-                    REPO_PATH="$APPIUM_REPO_PATH"
-                    GITIGNORED_FILES=("${APPIUM_GITIGNORED_FILES[@]}")
-                    DIR_PREFIX="appium_"
-                    INSTALL_PNPM_DEPS=true
-                    ;;
-                *)
-                    echo "Unknown --repo value: '$2' (expected android, ios or appium)" >&2
-                    usage >&2
-                    exit 1
-                    ;;
-            esac
-            shift 2
-            ;;
         --worktree-dir)
             WORKTREE_DIR="$2"
             shift 2
@@ -73,14 +41,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$REPO_PATH" || -z "$WORKTREE_DIR" || -z "$BRANCH" ]]; then
-    echo "--repo, --worktree-dir and --branch are all required." >&2
+if [[ -z "$WORKTREE_DIR" || -z "$BRANCH" ]]; then
+    echo "--worktree-dir and --branch are both required." >&2
     usage >&2
     exit 1
 fi
 
-# Group by feature: worktrees/<feature>/<repo>_<feature>
-NEW_WORKTREE_PATH="${WORKTREE_DIR_PATH%/}/${WORKTREE_DIR}/${DIR_PREFIX}${WORKTREE_DIR}"
+NEW_WORKTREE_PATH="${WORKTREE_DIR_PATH%/}/${WORKTREE_DIR}"
 
 if [[ -e "$NEW_WORKTREE_PATH" ]]; then
     echo "Worktree path already exists: $NEW_WORKTREE_PATH" >&2
@@ -98,6 +65,7 @@ else
     git -C "$REPO_PATH" worktree add -b "$BRANCH" "$NEW_WORKTREE_PATH"
 fi
 
+# Paths are relative to the repo root
 for file in "${GITIGNORED_FILES[@]}"; do
     src="$REPO_PATH/$file"
     dest="$NEW_WORKTREE_PATH/$file"
@@ -114,33 +82,38 @@ done
 
 # Install pnpm deps up front. Otherwise the first `pnpm test:*` sees node_modules out of sync and
 # re-verifies every lockfile entry against the registry, since that cache doesn't carry over to a
-# new worktree. Uses the repo's mise-pinned node/pnpm when mise is available.
+# new worktree. Uses the directory's mise-pinned node/pnpm when mise is available.
 install_pnpm_deps() {
-    local worktree="$1"
+    local rel="$1"                       # package directory, relative to the repo root
+    local dir="$NEW_WORKTREE_PATH/$rel"
     local runner=()
 
     if command -v mise >/dev/null 2>&1; then
-        mise trust --yes "$worktree" >/dev/null
-        (cd "$worktree" && mise install) || return 1
+        mise trust --yes "$dir" >/dev/null
+        (cd "$dir" && mise install) || return 1
         runner=(mise exec --)
     fi
 
     # The main checkout's lockfile was already verified there, so skip re-verifying it when unchanged
     local install_args=(--frozen-lockfile)
-    if git -C "$worktree" diff --quiet "$(git -C "$REPO_PATH" rev-parse HEAD)" -- pnpm-lock.yaml; then
+    if git -C "$NEW_WORKTREE_PATH" diff --quiet "$(git -C "$REPO_PATH" rev-parse HEAD)" -- "$rel/pnpm-lock.yaml"; then
         install_args+=(--trust-lockfile)
     else
-        echo "pnpm-lock.yaml differs from the main checkout — installing with full lockfile verification."
+        echo "$rel/pnpm-lock.yaml differs from the main checkout — installing with full lockfile verification."
     fi
 
-    (cd "$worktree" && "${runner[@]}" pnpm install "${install_args[@]}")
+    (cd "$dir" && "${runner[@]}" pnpm install "${install_args[@]}")
 }
 
-if [[ "$INSTALL_PNPM_DEPS" == true ]]; then
-    echo "Installing pnpm dependencies..."
-    if ! install_pnpm_deps "$NEW_WORKTREE_PATH"; then
-        echo "pnpm install failed — run it manually in $NEW_WORKTREE_PATH before running tests." >&2
+for rel in "${PNPM_INSTALL_DIRS[@]}"; do
+    if [[ ! -f "$NEW_WORKTREE_PATH/$rel/package.json" ]]; then
+        echo "Skipping pnpm install: no package.json in $rel" >&2
+        continue
     fi
-fi
+    echo "Installing pnpm dependencies in $rel..."
+    if ! install_pnpm_deps "$rel"; then
+        echo "pnpm install failed — run it manually in $NEW_WORKTREE_PATH/$rel before running tests." >&2
+    fi
+done
 
 echo "Worktree ready at $NEW_WORKTREE_PATH"
